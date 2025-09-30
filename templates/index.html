@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Контрактный эксперт</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Контрактный эксперт</h1>
+        <p>Проверка контрактов на соответствие 44-ФЗ и 223-ФЗ</p>
+
+        <div class="card">
+            <h2>Инициализация системы</h2>
+            <button id="initBtn" onclick="initializeLaws()">Загрузить законы в базу данных</button>
+            <div id="initStatus"></div>
+        </div>
+
+        <div class="card">
+            <h2>Анализ контракта</h2>
+            <form id="uploadForm" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label for="law_type">Выберите закон для проверки:</label>
+                    <select id="law_type" name="law_type" required>
+                        <option value="44_fz">44-ФЗ</option>
+                        <option value="223_fz">223-ФЗ</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="contract_file">Загрузите контракт (PDF):</label>
+                    <input type="file" id="contract_file" name="contract_file" accept=".pdf" required>
+                </div>
+
+                <button type="submit">Проанализировать контракт</button>
+            </form>
+        </div>
+
+        <div id="result" class="card hidden">
+            <h2>Результат анализа</h2>
+            <div id="analysisResult"></div>
+        </div>
+    </div>
+
+    <script>
+        async function initializeLaws() {
+            const btn = document.getElementById('initBtn');
+            const status = document.getElementById('initStatus');
+
+            btn.disabled = true;
+            btn.textContent = 'Загрузка...';
+            status.innerHTML = '<p>Инициализация базы данных...</p>';
+
+            try {
+                const response = await fetch('/initialize-laws');
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    status.innerHTML = `<p style="color: green;">✅ ${data.message}</p>`;
+                    if (data.laws_initialized) {
+                        data.laws_initialized.forEach(law => {
+                            status.innerHTML += `<p>Загружено ${law.articles_count} статей для ${law.law}</p>`;
+                        });
+                    }
+                } else {
+                    status.innerHTML = `<p style="color: red;">❌ ${data.message}</p>`;
+                }
+            } catch (error) {
+                status.innerHTML = `<p style="color: red;">❌ Ошибка: ${error}</p>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Загрузить законы в базу данных';
+            }
+        }
+
+        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const formData = new FormData(this);
+            const resultDiv = document.getElementById('analysisResult');
+            const resultCard = document.getElementById('result');
+
+            resultCard.classList.remove('hidden');
+            resultDiv.innerHTML = '<p>Анализ контракта...</p>';
+
+            try {
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    let html = `
+                        <h3>Проверка по ${data.law_type.toUpperCase()}</h3>
+                        <p><strong>Статус соответствия:</strong> ${data.analysis.compliance_status}</p>
+                        <p><strong>Общее заключение:</strong> ${data.analysis.summary}</p>
+                    `;
+
+                    if (data.analysis.issues && data.analysis.issues.length > 0) {
+                        html += '<h4>Выявленные проблемы:</h4><ul>';
+                        data.analysis.issues.forEach(issue => {
+                            html += `
+                                <li>
+                                    <strong>Статья ${issue.article}:</strong> ${issue.issue}
+                                    <br><em>Рекомендация:</em> ${issue.recommendation}
+                                </li>
+                            `;
+                        });
+                        html += '</ul>';
+                    } else {
+                        html += '<p>✅ Нарушений не выявлено</p>';
+                    }
+
+                    html += `<details><summary>Предпросмотр контракта</summary><pre>${data.contract_preview}</pre></details>`;
+
+                    resultDiv.innerHTML = html;
+                } else {
+                    resultDiv.innerHTML = `<p style="color: red;">❌ Ошибка: ${data.error}</p>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<p style="color: red;">❌ Ошибка: ${error}</p>`;
+            }
+        });
+    </script>
+</body>
+</html>
