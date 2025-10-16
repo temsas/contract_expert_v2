@@ -251,26 +251,26 @@ def system_status():
 
 @app.route('/suppliers', methods=['POST'])
 def get_suppliers():
-    """Подбор поставщиков по способу закупки и категории"""
+    """Подбор поставщиков по способу закупки и категории (поддерживает пустые значения)"""
     if not supplier_selector:
         return jsonify({'status': 'error', 'message': 'Система подбора поставщиков недоступна'}), 500
 
     data = request.get_json()
     purchase_method = data.get('purchase_method', '').strip()
     category = data.get('category', '').strip()
-    limit = data.get('limit', 5)
+    limit = data.get('limit', 50)
 
-    if not purchase_method or not category:
-        return jsonify({'status': 'error', 'message': 'Введите способ закупки и категорию'}), 400
-
-    top_suppliers = supplier_selector.get_top_suppliers(purchase_method, category, limit)
+    # Если оба параметра пустые, возвращаем всех поставщиков
+    if not purchase_method and not category:
+        top_suppliers = supplier_selector.get_filtered_suppliers(limit=limit)
+    else:
+        top_suppliers = supplier_selector.get_top_suppliers(purchase_method, category, limit)
 
     return jsonify({
         'status': 'success',
         'count': len(top_suppliers),
         'suppliers': top_suppliers
     })
-
 
 @app.route('/api/purchase-methods')
 def get_purchase_methods():

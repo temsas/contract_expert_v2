@@ -78,38 +78,9 @@ class SupplierSelector:
 
         logger.info(f"✅ Загружено {len(demo_suppliers)} демо-поставщиков")
 
-    def get_top_suppliers(self, purchase_method: str, category: str, limit: int = 5):
+    def get_top_suppliers(self, purchase_method: str, category: str, limit: int = 50):
         """Возвращает ТОП-N поставщиков по заданным параметрам"""
-        conn = self.db.get_connection()
-        cursor = conn.cursor()
-
-        # Ищем точное соответствие по способу закупки и категории
-        cursor.execute('''
-            SELECT name, category, purchase_method, rating, contracts_count, total_sum
-            FROM suppliers
-            WHERE purchase_method = ? AND category = ?
-            ORDER BY rating DESC, contracts_count DESC, total_sum DESC
-            LIMIT ?
-        ''', (purchase_method, category, limit))
-
-        rows = cursor.fetchall()
-        cursor.close()
-        conn.close()
-
-        suppliers = []
-        for row in rows:
-            suppliers.append({
-                'name': row[0],
-                'category': row[1],
-                'purchase_method': row[2],
-                'rating': row[3],
-                'contracts_count': row[4],
-                'total_sum': row[5]
-            })
-
-        logger.info(f"🔍 Найдено {len(suppliers)} поставщиков для {purchase_method}/{category}")
-
-        return suppliers
+        return self.get_filtered_suppliers(purchase_method, category, limit)
 
     def get_all_purchase_methods(self):
         """Возвращает все уникальные способы закупок из базы"""
@@ -139,6 +110,50 @@ class SupplierSelector:
             methods.sort()
 
         return methods
+
+    def get_filtered_suppliers(self, purchase_method: str = None, category: str = None, limit: int = 50):
+        """Возвращает поставщиков с фильтрацией (поддерживает частичные совпадения)"""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+
+        query = '''
+            SELECT name, category, purchase_method, rating, contracts_count, total_sum
+            FROM suppliers
+            WHERE 1=1
+        '''
+        params = []
+
+        if purchase_method:
+            query += ' AND purchase_method LIKE ?'
+            params.append(f'%{purchase_method}%')
+
+        if category:
+            query += ' AND category LIKE ?'
+            params.append(f'%{category}%')
+
+        query += ' ORDER BY rating DESC, contracts_count DESC, total_sum DESC LIMIT ?'
+        params.append(limit)
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        suppliers = []
+        for row in rows:
+            suppliers.append({
+                'name': row[0],
+                'category': row[1],
+                'purchase_method': row[2],
+                'rating': row[3],
+                'contracts_count': row[4],
+                'total_sum': row[5]
+            })
+
+        logger.info(f"🔍 Найдено {len(suppliers)} поставщиков для {purchase_method}/{category}")
+        return suppliers
+
+
 
     def get_all_categories(self):
         """Возвращает все уникальные категории из базы"""
