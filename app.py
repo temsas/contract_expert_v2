@@ -4,21 +4,25 @@ import re
 import PyPDF2
 from database.db_connection import Database
 from services.contract_analyzer import ContractAnalyzer
+from services.supplier_selector import SupplierSelector
+from services.data_parser import GosZakupParser
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['ALLOWED_EXTENSIONS'] = {'pdf', 'doc', 'docx'}
 
-# Инициализация анализатора при запуске
+# Инициализация анализаторов при запуске
 try:
     contract_analyzer = ContractAnalyzer()
+    supplier_selector = SupplierSelector()
     AI_AVAILABLE = True
     print("✅ Система инициализирована успешно")
 except Exception as e:
     print(f"❌ Ошибка инициализации: {e}")
     AI_AVAILABLE = False
     contract_analyzer = None
+    supplier_selector = None
 
 
 class FileProcessor:
@@ -49,7 +53,6 @@ class FileProcessor:
 
     @staticmethod
     def _extract_from_docx_stub(file_path, filename):
-
         try:
             from docx import Document
             doc = Document(file_path)
@@ -69,7 +72,6 @@ class LawParser:
         self.db = Database()
 
     def parse_law_pdf(self, file_path, law_type):
-
         print(f"📖 Парсим {law_type}...")
 
         if not os.path.exists(file_path):
@@ -91,7 +93,6 @@ class LawParser:
             return 0
 
     def _extract_articles_simple(self, text, law_type):
-
         articles_count = 0
 
         patterns = [
@@ -135,7 +136,6 @@ class LawParser:
 
 
 def initialize_system():
-
     print("🚀 Инициализация системы...")
 
     db = Database()
@@ -188,7 +188,6 @@ def index():
 
 @app.route('/analyze', methods=['POST'])
 def analyze_contract():
-
     if not AI_AVAILABLE:
         return jsonify({'error': 'Система недоступна. Проверьте настройки.'}), 500
 
@@ -207,13 +206,8 @@ def analyze_contract():
         file.save(file_path)
 
         try:
-
             contract_text = FileProcessor.extract_text_from_file(file_path, filename)
-
-
             result = contract_analyzer.analyze_contract(contract_text, law_type, filename)
-
-
             os.remove(file_path)
 
             return jsonify({
@@ -254,20 +248,22 @@ def system_status():
         'total_articles': articles_44 + articles_223
     })
 
-from services.supplier_selector import SupplierSelector
-supplier_selector = SupplierSelector()
 
 @app.route('/suppliers', methods=['POST'])
 def get_suppliers():
     """Подбор поставщиков по способу закупки и категории"""
+    if not supplier_selector:
+        return jsonify({'status': 'error', 'message': 'Система подбора поставщиков недоступна'}), 500
+
     data = request.get_json()
     purchase_method = data.get('purchase_method', '').strip()
     category = data.get('category', '').strip()
+    limit = data.get('limit', 5)
 
     if not purchase_method or not category:
         return jsonify({'status': 'error', 'message': 'Введите способ закупки и категорию'}), 400
 
-    top_suppliers = supplier_selector.get_top_suppliers(purchase_method, category)
+    top_suppliers = supplier_selector.get_top_suppliers(purchase_method, category, limit)
 
     return jsonify({
         'status': 'success',
@@ -275,31 +271,71 @@ def get_suppliers():
         'suppliers': top_suppliers
     })
 
-# Добавьте эти endpoints в ваш основной файл приложения
 
 @app.route('/api/purchase-methods')
 def get_purchase_methods():
-    selector = SupplierSelector()
-    methods = selector.get_all_purchase_methods()
+    if not supplier_selector:
+        return jsonify([])
+    methods = supplier_selector.get_all_purchase_methods()
     return jsonify(methods)
+
 
 @app.route('/api/categories')
 def get_categories():
-    selector = SupplierSelector()
-    categories = selector.get_all_categories()
+    if not supplier_selector:
+        return jsonify([])
+    categories = supplier_selector.get_all_categories()
     return jsonify(categories)
+
 
 @app.route('/api/search-categories/<query>')
 def search_categories(query):
-    selector = SupplierSelector()
-    categories = selector.search_categories(query)
+    if not supplier_selector:
+        return jsonify([])
+    categories = supplier_selector.search_categories(query)
     return jsonify(categories)
+
 
 @app.route('/api/search-purchase-methods/<query>')
 def search_purchase_methods(query):
-    selector = SupplierSelector()
-    methods = selector.search_purchase_methods(query)
+    if not supplier_selector:
+        return jsonify([])
+    methods = supplier_selector.search_purchase_methods(query)
     return jsonify(methods)
+
+
+@app.route('/api/update-suppliers', methods=['POST'])
+def update_suppliers():
+    """Обновляет данные поставщиков с сайта goszakup.gov.kz"""
+    try:
+        parser = GosZakupParser()
+        success = parser.update_all_suppliers()
+
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': 'Данные поставщиков успешно обновлены'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Не удалось обновить данные поставщиков'
+            }), 500
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Ошибка при обновлении: {str(e)}'
+        }), 500
+
+
+@app.route('/api/suppliers-stats')
+def get_suppliers_stats():
+    """Возвращает статистику по поставщикам в базе"""
+    if not supplier_selector:
+        return jsonify({})
+    stats = supplier_selector.get_suppliers_stats()
+    return jsonify(stats)
 
 
 if __name__ == '__main__':
@@ -312,8 +348,3 @@ if __name__ == '__main__':
     print("🔍 Интерфейс: http://localhost:5000/")
 
     app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)
-    from services.supplier_selector import SupplierSelector
-
-    supplier_selector = SupplierSelector()
-
-

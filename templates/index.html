@@ -16,6 +16,8 @@
         button:hover { background: #0056b3; }
         button:disabled { background: #6c757d; cursor: not-allowed; }
         .format-info { background: #e9ecef; padding: 10px; border-radius: 4px; margin: 10px 0; font-size: 14px; }
+        .update-btn { background: #28a745; margin-left: 10px; }
+        .update-btn:hover { background: #218838; }
     </style>
 </head>
 <body>
@@ -65,7 +67,12 @@
         <!-- 📦 МОДУЛЬ ПОДБОРА ПОСТАВЩИКОВ -->
         <!-- ======================== -->
         <div class="card">
-            <h2>📦 Подбор поставщиков</h2>
+            <h2>📦 Подбор поставщиков из goszakup.gov.kz</h2>
+
+            <div class="format-info">
+                <strong>Данные загружаются с официального портала goszakup.gov.kz</strong>
+            </div>
+
             <form id="supplierForm">
                 <div class="form-group">
                     <label for="purchase_method">Способ закупки:</label>
@@ -74,11 +81,31 @@
                            name="purchase_method"
                            list="purchase_methods"
                            placeholder="Начните вводить способ закупки..."
+                           value=""
                            required>
                     <datalist id="purchase_methods">
-                        <!-- Варианты будут подгружаться через JavaScript -->
+                        <option value="Из одного источника путем прямого заключения договора">
+                        <option value="Через товарные биржи">
+                        <option value="Открытый конкурс">
+                        <option value="Запрос ценовых предложений">
+                        <option value="Из одного источника по несостоявшимся закупкам">
+                        <option value="Аукцион (до 2022)">
+                        <option value="Закупка жилища">
+                        <option value="Электронный магазин">
+                        <option value="Второй этап конкурса с использованием рамочного соглашения">
+                        <option value="Из одного источника путем прямого заключения договора по питанию обучающихся">
+                        <option value="Аукцион (с 2022)">
+                        <option value="Договор на услуги государственного образовательного заказа">
+                        <option value="Конкурс с использованием рейтингово-балльной системы">
+                        <option value="Конкурс по строительству «под ключ»">
+                        <option value="Конкурс с предварительным квалификационным отбором">
+                        <option value="Закупка по государственному социальному заказу">
+                        <option value="Конкурс с применением специального порядка">
+                        <option value="Конкурс по приобретению услуг по организации питания воспитанников и обучающихся">
+                        <option value="Конкурс по приобретению товаров, связанных с обеспечением питания воспитанников и обучающихся">
                     </datalist>
                 </div>
+
                 <div class="form-group">
                     <label for="category">Вид предмета закупки:</label>
                     <input type="text"
@@ -86,22 +113,30 @@
                            name="category"
                            list="categories"
                            placeholder="Начните вводить категорию..."
+                           value=""
                            required>
                     <datalist id="categories">
-                        <!-- Варианты будут подгружаться через JavaScript -->
+                        <option value="Товар">
+                        <option value="Работа">
+                        <option value="Услуга">
                     </datalist>
                 </div>
-                <button type="submit">Найти поставщиков</button>
+
+                <div>
+                    <button type="submit">Найти поставщиков</button>
+                        <!-- КНОПКА ОБНОВИТЬ ДАННЫЕ ТУТ ЕСЛИ ПРИГОДИТСЯ -->
+                </div>
             </form>
 
             <div id="supplierResult" class="hidden">
-                <h3>ТОП-5 поставщиков</h3>
+                <h3>ТОП поставщиков</h3>
+                <div id="supplierStats" style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 4px;"></div>
                 <ul id="supplierList"></ul>
             </div>
         </div>
     </div>
 
-    <script>
+        <script>
         // Анализ контракта
         document.getElementById('uploadForm').addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -157,138 +192,116 @@
         });
 
         // ========================
-        // 📦 АВТОДОПОЛНЕНИЕ ДЛЯ ПОЛЕЙ ПОСТАВЩИКОВ
+        // 📦 ПОДБОР ПОСТАВЩИКОВ
         // ========================
 
-        // Загрузка всех вариантов при загрузке страницы
-        document.addEventListener('DOMContentLoaded', function() {
-            loadPurchaseMethods();
-            loadCategories();
-        });
-
-        // Загрузка способов закупки
-        async function loadPurchaseMethods() {
-            try {
-                const response = await fetch('/api/purchase-methods');
-                const methods = await response.json();
-
-                const datalist = document.getElementById('purchase_methods');
-                datalist.innerHTML = '';
-
-                methods.forEach(method => {
-                    const option = document.createElement('option');
-                    option.value = method;
-                    datalist.appendChild(option);
-                });
-            } catch (error) {
-                console.error('Ошибка загрузки способов закупки:', error);
-            }
-        }
-
-        // Загрузка категорий
-        async function loadCategories() {
-            try {
-                const response = await fetch('/api/categories');
-                const categories = await response.json();
-
-                const datalist = document.getElementById('categories');
-                datalist.innerHTML = '';
-
-                categories.forEach(category => {
-                    const option = document.createElement('option');
-                    option.value = category;
-                    datalist.appendChild(option);
-                });
-            } catch (error) {
-                console.error('Ошибка загрузки категорий:', error);
-            }
-        }
-
-        // Динамический поиск при вводе
-        document.getElementById('purchase_method').addEventListener('input', function(e) {
-            const query = e.target.value;
-            if (query.length >= 2) {
-                searchPurchaseMethods(query);
-            }
-        });
-
-        document.getElementById('category').addEventListener('input', function(e) {
-            const query = e.target.value;
-            if (query.length >= 2) {
-                searchCategories(query);
-            }
-        });
-
-        async function searchPurchaseMethods(query) {
-            try {
-                const response = await fetch(`/api/search-purchase-methods/${encodeURIComponent(query)}`);
-                const methods = await response.json();
-
-                const datalist = document.getElementById('purchase_methods');
-                datalist.innerHTML = '';
-
-                methods.forEach(method => {
-                    const option = document.createElement('option');
-                    option.value = method;
-                    datalist.appendChild(option);
-                });
-            } catch (error) {
-                console.error('Ошибка поиска способов закупки:', error);
-            }
-        }
-
-        async function searchCategories(query) {
-            try {
-                const response = await fetch(`/api/search-categories/${encodeURIComponent(query)}`);
-                const categories = await response.json();
-
-                const datalist = document.getElementById('categories');
-                datalist.innerHTML = '';
-
-                categories.forEach(category => {
-                    const option = document.createElement('option');
-                    option.value = category;
-                    datalist.appendChild(option);
-                });
-            } catch (error) {
-                console.error('Ошибка поиска категорий:', error);
-            }
-        }
-
-        // Поиск поставщиков
+        // Функция поиска поставщиков
         document.getElementById('supplierForm').addEventListener('submit', async function(e) {
             e.preventDefault();
+            await searchSuppliers();
+        });
+
+        // Функция обновления данных
+        document.getElementById('updateDataBtn').addEventListener('click', async function() {
+            await updateSuppliersData();
+        });
+
+        async function searchSuppliers() {
             const method = document.getElementById('purchase_method').value;
             const category = document.getElementById('category').value;
 
             const resultDiv = document.getElementById('supplierResult');
             const list = document.getElementById('supplierList');
-            list.innerHTML = '<li>Загрузка...</li>';
+            const statsDiv = document.getElementById('supplierStats');
+
+            list.innerHTML = '<li>Загрузка данных...</li>';
+            statsDiv.innerHTML = 'Загрузка статистики...';
             resultDiv.classList.remove('hidden');
 
             try {
                 const response = await fetch('/suppliers', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({purchase_method: method, category: category})
+                    body: JSON.stringify({
+                        purchase_method: method,
+                        category: category,
+                        limit: 10
+                    })
                 });
+
                 const data = await response.json();
+
                 if (data.status === 'success' && data.suppliers.length > 0) {
+                    // Показываем статистику
+                    const statsResponse = await fetch('/api/suppliers-stats');
+                    const stats = await statsResponse.json();
+
+                    statsDiv.innerHTML = `
+                        Всего поставщиков в базе: <strong>${stats.total_suppliers || 0}</strong> |
+                        Уникальных способов закупки: <strong>${stats.unique_methods || 0}</strong> |
+                        Уникальных категорий: <strong>${stats.unique_categories || 0}</strong>
+                    `;
+
+                    // Показываем поставщиков
                     list.innerHTML = '';
-                    data.suppliers.forEach(s => {
+                    data.suppliers.forEach((s, index) => {
                         list.innerHTML += `
-                            <li>
-                                <strong>${s.name}</strong> — рейтинг ${s.rating}⭐
-                                <br>Категория: ${s.category}, способ: ${s.purchase_method}
-                                <br>Контрактов: ${s.contracts_count}, сумма: ${s.total_sum.toLocaleString()} ₸
+                            <li style="margin-bottom: 15px; padding: 15px; background: white; border: 1px solid #ddd; border-radius: 4px;">
+                                <strong>${index + 1}. ${s.name}</strong><br>
+                                <span style="color: #666;">Рейтинг: ${s.rating}⭐ | Контрактов: ${s.contracts_count.toLocaleString()} | Сумма: ${s.total_sum.toLocaleString()} ₸</span><br>
+                                <small>Категория: ${s.category} | Способ: ${s.purchase_method}</small>
                             </li>`;
                     });
                 } else {
-                    list.innerHTML = '<li>❌ Поставщики не найдены</li>';
+                    list.innerHTML = `
+                        <li>❌ Поставщики не найдены в базе данных</li>
+                        <li>
+                            <button type="button" onclick="updateSuppliersData()" style="background: #007bff; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; margin-top: 10px;">
+                                🔄 Загрузить данные с goszakup.gov.kz
+                            </button>
+                        </li>
+                    `;
+                    statsDiv.innerHTML = 'Данные отсутствуют';
                 }
             } catch (err) {
-                list.innerHTML = `<li>Ошибка: ${err}</li>`;
+                list.innerHTML = `<li>Ошибка: ${err.message}</li>`;
+                statsDiv.innerHTML = 'Ошибка загрузки статистики';
             }
+        }
+
+        async function updateSuppliersData() {
+            const btn = document.getElementById('updateDataBtn');
+
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '🔄 Загрузка...';
+
+            try {
+                const response = await fetch('/api/update-suppliers', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    alert('✅ ' + data.message);
+                    // После обновления данных сразу показываем результат
+                    await searchSuppliers();
+                } else {
+                    alert('❌ ' + data.message);
+                }
+            } catch (error) {
+                alert('❌ Ошибка при обновлении данных: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+
+        // Загрузка доступных вариантов при загрузке страницы
+        document.addEventListener('DOMContentLoaded', function() {
+            // Значения уже установлены по умолчанию
         });
     </script>
 </body>

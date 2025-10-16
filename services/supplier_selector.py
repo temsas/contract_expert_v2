@@ -1,17 +1,21 @@
 # services/supplier_selector.py
 from database.db_connection import Database
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class SupplierSelector:
     def __init__(self):
         self.db = Database()
-        self._ensure_demo_suppliers()
+        self._ensure_suppliers_table()
+        self._ensure_initial_data()
 
-    def _ensure_demo_suppliers(self):
-        """Создает таблицу и демо-данные поставщиков (однократно при старте)"""
+    def _ensure_suppliers_table(self):
+        """Создает таблицу поставщиков если её нет"""
         conn = self.db.get_connection()
         cursor = conn.cursor()
 
-        # ✅ Создаём таблицу, если её ещё нет
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS suppliers (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24,72 +28,91 @@ class SupplierSelector:
             )
         ''')
 
-        # ✅ Проверяем, есть ли уже данные
+        cursor.close()
+        conn.close()
+
+    def _ensure_initial_data(self):
+        """Проверяет, есть ли данные в базе, если нет - загружает демо"""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+
         cursor.execute("SELECT COUNT(*) FROM suppliers")
         count = cursor.fetchone()[0]
 
-        # ✅ Если таблица пустая — вставляем демо-данные
         if count == 0:
-            demo_suppliers = [
-                ("ТОО КазСтройПром", "строительные работы", "конкурс", 4.8, 122, 1200000000),
-                ("ТОО ЭнергоСнаб", "электрооборудование", "аукцион", 4.6, 98, 900000000),
-                ("ТОО МедСнаб", "медицинское оборудование", "запрос ценовых предложений", 4.7, 150, 1050000000),
-                ("ТОО СофтЛайн", "IT-услуги", "аукцион", 4.9, 75, 850000000),
-                ("ТОО ТрансЛогистик", "транспортные услуги", "аукцион", 4.5, 110, 970000000),
-                ("ТОО КазХим", "химические реагенты", "конкурс", 4.4, 85, 800000000),
-                ("ТОО CleanCity", "уборочные услуги", "запрос ценовых предложений", 4.2, 120, 450000000),
-                ("ТОО АстанаСтрой", "строительные работы", "аукцион", 4.9, 130, 1500000000),
-                ("ТОО AgroLine", "сельхозпродукция", "конкурс", 4.3, 115, 770000000),
-                ("ТОО MegaFood", "поставка продуктов", "аукцион", 4.6, 160, 1300000000),
-                ("ТОО PrintLab", "типографские услуги", "запрос ценовых предложений", 4.1, 80, 250000000),
-                ("ТОО SmartEnergy", "энергетические услуги", "аукцион", 4.8, 95, 1100000000),
-                ("ТОО SafeNet", "IT-услуги", "конкурс", 4.7, 105, 950000000),
-                ("ТОО MedFarm", "медицинское оборудование", "аукцион", 4.9, 130, 1400000000),
-                ("ТОО ТехСнаб", "промышленное оборудование", "конкурс", 4.5, 90, 880000000),
-                ("ТОО ЭкспертПоставка", "оборудование", "аукцион", 4.6, 102, 960000000),
-                ("ТОО GreenBuild", "строительные работы", "аукцион", 4.7, 85, 650000000),
-                ("ТОО МедТехСнаб", "медицинское оборудование", "конкурс", 4.9, 140, 1550000000),
-                ("ТОО ITProService", "IT-услуги", "аукцион", 4.8, 112, 1240000000),
-                ("ТОО ЭкоЧист", "уборочные услуги", "запрос ценовых предложений", 4.4, 88, 500000000),
-                ("ТОО AgroExport", "сельхозпродукция", "конкурс", 4.5, 145, 990000000),
-                ("ТОО AutoLogistic", "транспортные услуги", "аукцион", 4.7, 155, 1360000000),
-                ("ТОО CityPrint", "типографские услуги", "запрос ценовых предложений", 4.3, 92, 400000000),
-                ("ТОО TechSystems", "электрооборудование", "конкурс", 4.8, 108, 1020000000),
-                ("ТОО PowerEnergy", "энергетические услуги", "аукцион", 4.9, 145, 1490000000),
-            ]
-
-            cursor.executemany('''
-                INSERT INTO suppliers (name, category, purchase_method, rating, contracts_count, total_sum)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', demo_suppliers)
-            conn.commit()
-            print(f"✅ Добавлено {len(demo_suppliers)} поставщиков в базу данных.")
+            logger.info("🔄 База поставщиков пуста, загружаем демо-данные...")
+            self._load_demo_suppliers()
+        else:
+            logger.info(f"✅ В базе уже есть {count} поставщиков")
 
         cursor.close()
         conn.close()
 
-    def get_top_suppliers(self, purchase_method: str, category: str, limit: int = 5):
-        """Возвращает ТОП-N поставщиков по заданным параметрам (без учёта регистра)"""
+    def _load_demo_suppliers(self):
+        """Загружает демо-данные"""
         conn = self.db.get_connection()
         cursor = conn.cursor()
 
+        demo_suppliers = [
+            ("ТОО КазСтройПром", "Работа", "Из одного источника путем прямого заключения договора", 4.8, 122,
+             1200000000),
+            ("ТОО ЭнергоСнаб", "Товар", "Аукцион (с 2022)", 4.6, 98, 900000000),
+            ("ТОО МедСнаб", "Услуга", "Запрос ценовых предложений", 4.7, 150, 1050000000),
+            ("ТОО СофтЛайн", "Услуга", "Электронный магазин", 4.9, 75, 850000000),
+            ("ТОО ТрансЛогистик", "Услуга", "Открытый конкурс", 4.5, 110, 970000000),
+            ("ТОО КазХим", "Товар", "Конкурс с использованием рейтингово-балльной системы", 4.4, 85, 800000000),
+            ("ТОО CleanCity", "Услуга", "Запрос ценовых предложений", 4.2, 120, 450000000),
+            ("ТОО АстанаСтрой", "Работа", "Конкурс по строительству «под ключ»", 4.9, 130, 1500000000),
+            ("ТОО AgroLine", "Товар", "Через товарные биржи", 4.3, 115, 770000000),
+            ("ТОО MegaFood", "Товар", "Аукцион (с 2022)", 4.6, 160, 1300000000),
+        ]
+
+        cursor.executemany('''
+            INSERT INTO suppliers (name, category, purchase_method, rating, contracts_count, total_sum)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', demo_suppliers)
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        logger.info(f"✅ Загружено {len(demo_suppliers)} демо-поставщиков")
+
+    def get_top_suppliers(self, purchase_method: str, category: str, limit: int = 5):
+        """Возвращает ТОП-N поставщиков по заданным параметрам"""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+
+        # Ищем точное соответствие по способу закупки и категории
         cursor.execute('''
             SELECT name, category, purchase_method, rating, contracts_count, total_sum
             FROM suppliers
-            WHERE LOWER(purchase_method) LIKE LOWER(?) AND LOWER(category) LIKE LOWER(?)
-            ORDER BY rating DESC, total_sum DESC
+            WHERE purchase_method = ? AND category = ?
+            ORDER BY rating DESC, contracts_count DESC, total_sum DESC
             LIMIT ?
-        ''', (f"%{purchase_method}%", f"%{category}%", limit))
+        ''', (purchase_method, category, limit))
 
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
 
-        return [dict(row) for row in rows]
+        suppliers = []
+        for row in rows:
+            suppliers.append({
+                'name': row[0],
+                'category': row[1],
+                'purchase_method': row[2],
+                'rating': row[3],
+                'contracts_count': row[4],
+                'total_sum': row[5]
+            })
 
-    # ✅ НОВЫЕ МЕТОДЫ ДЛЯ ВЫПАДАЮЩИХ СПИСКОВ
+        logger.info(f"🔍 Найдено {len(suppliers)} поставщиков для {purchase_method}/{category}")
+
+        return suppliers
+
     def get_all_purchase_methods(self):
-        """Возвращает все уникальные способы закупок"""
+        """Возвращает все уникальные способы закупок из базы"""
         conn = self.db.get_connection()
         cursor = conn.cursor()
 
@@ -103,10 +126,22 @@ class SupplierSelector:
         cursor.close()
         conn.close()
 
+        # Если в базе мало методов, добавляем стандартные
+        if len(methods) < 5:
+            methods.extend([
+                "Из одного источника путем прямого заключения договора",
+                "Аукцион (с 2022)",
+                "Запрос ценовых предложений",
+                "Открытый конкурс",
+                "Электронный магазин"
+            ])
+            methods = list(set(methods))  # Убираем дубликаты
+            methods.sort()
+
         return methods
 
     def get_all_categories(self):
-        """Возвращает все уникальные категории"""
+        """Возвращает все уникальные категории из базы"""
         conn = self.db.get_connection()
         cursor = conn.cursor()
 
@@ -119,43 +154,41 @@ class SupplierSelector:
         categories = [row[0] for row in cursor.fetchall()]
         cursor.close()
         conn.close()
+
+        # Если в базе мало категорий, добавляем стандартные
+        if len(categories) < 3:
+            categories.extend(["Товар", "Работа", "Услуга"])
+            categories = list(set(categories))
+            categories.sort()
 
         return categories
 
     def search_categories(self, query: str):
         """Поиск категорий по частичному совпадению"""
-        conn = self.db.get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute('''
-            SELECT DISTINCT category 
-            FROM suppliers 
-            WHERE LOWER(category) LIKE LOWER(?)
-            ORDER BY category
-            LIMIT 10
-        ''', (f"%{query}%",))
-
-        categories = [row[0] for row in cursor.fetchall()]
-        cursor.close()
-        conn.close()
-
-        return categories
+        all_categories = self.get_all_categories()
+        return [cat for cat in all_categories if query.lower() in cat.lower()][:10]
 
     def search_purchase_methods(self, query: str):
         """Поиск способов закупки по частичному совпадению"""
+        all_methods = self.get_all_purchase_methods()
+        return [method for method in all_methods if query.lower() in method.lower()][:10]
+
+    def get_suppliers_stats(self):
+        """Возвращает статистику по поставщикам"""
         conn = self.db.get_connection()
         cursor = conn.cursor()
 
         cursor.execute('''
-            SELECT DISTINCT purchase_method 
-            FROM suppliers 
-            WHERE LOWER(purchase_method) LIKE LOWER(?)
-            ORDER BY purchase_method
-            LIMIT 10
-        ''', (f"%{query}%",))
+            SELECT 
+                COUNT(*) as total_suppliers,
+                COUNT(DISTINCT purchase_method) as unique_methods,
+                COUNT(DISTINCT category) as unique_categories
+            FROM suppliers
+        ''')
 
-        methods = [row[0] for row in cursor.fetchall()]
+        stats = dict(cursor.fetchone())
+
         cursor.close()
         conn.close()
 
-        return methods
+        return stats
