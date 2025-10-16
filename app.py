@@ -183,117 +183,7 @@ def allowed_file(filename):
 
 @app.route('/')
 def index():
-    return '''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Контрактный эксперт</title>
-        <style>
-            body { font-family: Arial, sans-serif; margin: 40px; background: #f8f9fa; }
-            .container { max-width: 800px; margin: 0 auto; }
-            .card { background: white; padding: 25px; margin: 20px 0; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-            button { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
-            button:hover { background: #0056b3; }
-            button:disabled { background: #6c757d; cursor: not-allowed; }
-            .format-info { background: #e9ecef; padding: 10px; border-radius: 4px; margin: 10px 0; font-size: 14px; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>🔍 Контрактный эксперт</h1>
-            <p>Проверка контрактов на соответствие 44-ФЗ и 223-ФЗ</p>
-
-            <div class="card">
-                <h2>Анализ контракта</h2>
-
-                <div class="format-info">
-                    <strong>Поддерживаемые форматы:</strong> PDF, DOC, DOCX
-                </div>
-
-                <form id="uploadForm" enctype="multipart/form-data" style="margin-top: 15px;">
-                    <div style="margin: 15px 0;">
-                        <label for="law_type" style="display: block; margin-bottom: 5px; font-weight: bold;">Выберите закон для проверки:</label>
-                        <select id="law_type" name="law_type" required style="padding: 10px; width: 100%; border: 1px solid #ddd; border-radius: 4px;">
-                            <option value="44_fz">44-ФЗ</option>
-                            <option value="223_fz">223-ФЗ</option>
-                        </select>
-                    </div>
-
-                    <div style="margin: 15px 0;">
-                        <label for="contract_file" style="display: block; margin-bottom: 5px; font-weight: bold;">Загрузите контракт:</label>
-                        <input type="file" id="contract_file" name="contract_file" 
-                               accept=".pdf,.doc,.docx" required style="padding: 8px; width: 100%;">
-                    </div>
-
-                    <button type="submit" ''' + ('disabled' if not AI_AVAILABLE else '') + '''>
-                        ''' + ("🔍 Проанализировать контракт" if AI_AVAILABLE else "❌ Система недоступна") + '''
-                    </button>
-                </form>
-            </div>
-
-            <div id="result" class="card" style="display: none;">
-                <h2>Результат анализа</h2>
-                <div id="analysisResult"></div>
-            </div>
-        </div>
-
-        <script>
-            document.getElementById('uploadForm').addEventListener('submit', async function(e) {
-                e.preventDefault();
-
-                const formData = new FormData(this);
-                const resultDiv = document.getElementById('analysisResult');
-                const resultCard = document.getElementById('result');
-
-                resultCard.style.display = 'block';
-                resultDiv.innerHTML = '<p>⏳ Анализ контракта...</p>';
-
-                try {
-                    const response = await fetch('/analyze', {
-                        method: 'POST',
-                        body: formData
-                    });
-
-                    const data = await response.json();
-
-                    if (data.status === 'success') {
-                        let html = `
-                            <h3>Проверка по ${data.law_type.toUpperCase()}</h3>
-                            <p><strong>Файл:</strong> ${data.filename}</p>
-                            <p><strong>Статус соответствия:</strong> <span style="font-weight: bold; color: ${
-                                data.analysis.compliance_status === 'соответствует' ? 'green' : 
-                                data.analysis.compliance_status === 'частично соответствует' ? 'orange' : 'red'
-                            }">${data.analysis.compliance_status}</span></p>
-                            <p><strong>Заключение:</strong> ${data.analysis.summary}</p>
-                        `;
-
-                        if (data.analysis.issues && data.analysis.issues.length > 0) {
-                            html += '<h4>Выявленные проблемы:</h4><ul>';
-                            data.analysis.issues.forEach(issue => {
-                                html += `
-                                    <li style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-left: 4px solid #e74c3c;">
-                                        <strong>${issue.article}:</strong> ${issue.issue}
-                                        <br><em>Рекомендация:</em> ${issue.recommendation}
-                                    </li>
-                                `;
-                            });
-                            html += '</ul>';
-                        } else {
-                            html += '<p style="color: green; font-weight: bold;">✅ Нарушений не выявлено</p>';
-                        }
-
-                        resultDiv.innerHTML = html;
-                    } else {
-                        resultDiv.innerHTML = `<p style="color: red;">❌ Ошибка: ${data.error}</p>`;
-                    }
-                } catch (error) {
-                    resultDiv.innerHTML = `<p style="color: red;">❌ Ошибка: ${error}</p>`;
-                }
-            });
-        </script>
-    </body>
-    </html>
-    '''
+    return render_template('index.html', AI_AVAILABLE=AI_AVAILABLE)
 
 
 @app.route('/analyze', methods=['POST'])
@@ -364,6 +254,53 @@ def system_status():
         'total_articles': articles_44 + articles_223
     })
 
+from services.supplier_selector import SupplierSelector
+supplier_selector = SupplierSelector()
+
+@app.route('/suppliers', methods=['POST'])
+def get_suppliers():
+    """Подбор поставщиков по способу закупки и категории"""
+    data = request.get_json()
+    purchase_method = data.get('purchase_method', '').strip()
+    category = data.get('category', '').strip()
+
+    if not purchase_method or not category:
+        return jsonify({'status': 'error', 'message': 'Введите способ закупки и категорию'}), 400
+
+    top_suppliers = supplier_selector.get_top_suppliers(purchase_method, category)
+
+    return jsonify({
+        'status': 'success',
+        'count': len(top_suppliers),
+        'suppliers': top_suppliers
+    })
+
+# Добавьте эти endpoints в ваш основной файл приложения
+
+@app.route('/api/purchase-methods')
+def get_purchase_methods():
+    selector = SupplierSelector()
+    methods = selector.get_all_purchase_methods()
+    return jsonify(methods)
+
+@app.route('/api/categories')
+def get_categories():
+    selector = SupplierSelector()
+    categories = selector.get_all_categories()
+    return jsonify(categories)
+
+@app.route('/api/search-categories/<query>')
+def search_categories(query):
+    selector = SupplierSelector()
+    categories = selector.search_categories(query)
+    return jsonify(categories)
+
+@app.route('/api/search-purchase-methods/<query>')
+def search_purchase_methods(query):
+    selector = SupplierSelector()
+    methods = selector.search_purchase_methods(query)
+    return jsonify(methods)
+
 
 if __name__ == '__main__':
     os.makedirs('uploads', exist_ok=True)
@@ -375,3 +312,8 @@ if __name__ == '__main__':
     print("🔍 Интерфейс: http://localhost:5000/")
 
     app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)
+    from services.supplier_selector import SupplierSelector
+
+    supplier_selector = SupplierSelector()
+
+

@@ -33,7 +33,6 @@ class Database:
                 )
             ''')
 
-
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS contract_analysis (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,6 +42,17 @@ class Database:
                     issues_found TEXT,
                     recommendations TEXT,
                     analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS suppliers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    purchase_method TEXT NOT NULL,
+                    rating REAL NOT NULL,
+                    contracts_count INTEGER NOT NULL,
+                    total_sum REAL NOT NULL
                 )
             ''')
 

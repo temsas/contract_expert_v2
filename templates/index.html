@@ -5,21 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Контрактный эксперт</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .hidden { display: none; }
+        .container { max-width: 800px; margin: 0 auto; padding: 20px; }
+        .card { background: white; padding: 25px; margin: 20px 0; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .form-group { margin: 15px 0; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, select { padding: 10px; width: 100%; border: 1px solid #ddd; border-radius: 4px; }
+        button { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #6c757d; cursor: not-allowed; }
+        .format-info { background: #e9ecef; padding: 10px; border-radius: 4px; margin: 10px 0; font-size: 14px; }
+    </style>
 </head>
 <body>
+
     <div class="container">
         <h1>🔍 Контрактный эксперт</h1>
         <p>Проверка контрактов на соответствие 44-ФЗ и 223-ФЗ</p>
 
         <div class="card">
-            <h2>Инициализация системы</h2>
-            <button id="initBtn" onclick="initializeLaws()">Загрузить законы в базу данных</button>
-            <div id="initStatus"></div>
-        </div>
-
-        <div class="card">
             <h2>Анализ контракта</h2>
-            <form id="uploadForm" enctype="multipart/form-data">
+
+            <div class="format-info">
+                <strong>Поддерживаемые форматы:</strong> PDF, DOC, DOCX
+            </div>
+
+            <form id="uploadForm" enctype="multipart/form-data" style="margin-top: 15px;">
                 <div class="form-group">
                     <label for="law_type">Выберите закон для проверки:</label>
                     <select id="law_type" name="law_type" required>
@@ -29,11 +41,18 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="contract_file">Загрузите контракт (PDF):</label>
-                    <input type="file" id="contract_file" name="contract_file" accept=".pdf" required>
+                    <label for="contract_file">Загрузите контракт:</label>
+                    <input type="file" id="contract_file" name="contract_file"
+                           accept=".pdf,.doc,.docx" required>
                 </div>
 
-                <button type="submit">Проанализировать контракт</button>
+                <button type="submit" id="analyzeBtn">
+                    {% if AI_AVAILABLE %}
+                        🔍 Проанализировать контракт
+                    {% else %}
+                        ❌ Система недоступна
+                    {% endif %}
+                </button>
             </form>
         </div>
 
@@ -41,39 +60,49 @@
             <h2>Результат анализа</h2>
             <div id="analysisResult"></div>
         </div>
+
+        <!-- ======================== -->
+        <!-- 📦 МОДУЛЬ ПОДБОРА ПОСТАВЩИКОВ -->
+        <!-- ======================== -->
+        <div class="card">
+            <h2>📦 Подбор поставщиков</h2>
+            <form id="supplierForm">
+                <div class="form-group">
+                    <label for="purchase_method">Способ закупки:</label>
+                    <input type="text"
+                           id="purchase_method"
+                           name="purchase_method"
+                           list="purchase_methods"
+                           placeholder="Начните вводить способ закупки..."
+                           required>
+                    <datalist id="purchase_methods">
+                        <!-- Варианты будут подгружаться через JavaScript -->
+                    </datalist>
+                </div>
+                <div class="form-group">
+                    <label for="category">Вид предмета закупки:</label>
+                    <input type="text"
+                           id="category"
+                           name="category"
+                           list="categories"
+                           placeholder="Начните вводить категорию..."
+                           required>
+                    <datalist id="categories">
+                        <!-- Варианты будут подгружаться через JavaScript -->
+                    </datalist>
+                </div>
+                <button type="submit">Найти поставщиков</button>
+            </form>
+
+            <div id="supplierResult" class="hidden">
+                <h3>ТОП-5 поставщиков</h3>
+                <ul id="supplierList"></ul>
+            </div>
+        </div>
     </div>
 
     <script>
-        async function initializeLaws() {
-            const btn = document.getElementById('initBtn');
-            const status = document.getElementById('initStatus');
-
-            btn.disabled = true;
-            btn.textContent = 'Загрузка...';
-            status.innerHTML = '<p>Инициализация базы данных...</p>';
-
-            try {
-                const response = await fetch('/initialize-laws');
-                const data = await response.json();
-
-                if (data.status === 'success') {
-                    status.innerHTML = `<p style="color: green;">✅ ${data.message}</p>`;
-                    if (data.laws_initialized) {
-                        data.laws_initialized.forEach(law => {
-                            status.innerHTML += `<p>Загружено ${law.articles_count} статей для ${law.law}</p>`;
-                        });
-                    }
-                } else {
-                    status.innerHTML = `<p style="color: red;">❌ ${data.message}</p>`;
-                }
-            } catch (error) {
-                status.innerHTML = `<p style="color: red;">❌ Ошибка: ${error}</p>`;
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Загрузить законы в базу данных';
-            }
-        }
-
+        // Анализ контракта
         document.getElementById('uploadForm').addEventListener('submit', async function(e) {
             e.preventDefault();
 
@@ -82,7 +111,7 @@
             const resultCard = document.getElementById('result');
 
             resultCard.classList.remove('hidden');
-            resultDiv.innerHTML = '<p>Анализ контракта...</p>';
+            resultDiv.innerHTML = '<p>⏳ Анализ контракта...</p>';
 
             try {
                 const response = await fetch('/analyze', {
@@ -95,26 +124,28 @@
                 if (data.status === 'success') {
                     let html = `
                         <h3>Проверка по ${data.law_type.toUpperCase()}</h3>
-                        <p><strong>Статус соответствия:</strong> ${data.analysis.compliance_status}</p>
-                        <p><strong>Общее заключение:</strong> ${data.analysis.summary}</p>
+                        <p><strong>Файл:</strong> ${data.filename}</p>
+                        <p><strong>Статус соответствия:</strong> <span style="font-weight: bold; color: ${
+                            data.analysis.compliance_status === 'соответствует' ? 'green' :
+                            data.analysis.compliance_status === 'частично соответствует' ? 'orange' : 'red'
+                        }">${data.analysis.compliance_status}</span></p>
+                        <p><strong>Заключение:</strong> ${data.analysis.summary}</p>
                     `;
 
                     if (data.analysis.issues && data.analysis.issues.length > 0) {
                         html += '<h4>Выявленные проблемы:</h4><ul>';
                         data.analysis.issues.forEach(issue => {
                             html += `
-                                <li>
-                                    <strong>Статья ${issue.article}:</strong> ${issue.issue}
+                                <li style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-left: 4px solid #e74c3c;">
+                                    <strong>${issue.article}:</strong> ${issue.issue}
                                     <br><em>Рекомендация:</em> ${issue.recommendation}
                                 </li>
                             `;
                         });
                         html += '</ul>';
                     } else {
-                        html += '<p>✅ Нарушений не выявлено</p>';
+                        html += '<p style="color: green; font-weight: bold;">✅ Нарушений не выявлено</p>';
                     }
-
-                    html += `<details><summary>Предпросмотр контракта</summary><pre>${data.contract_preview}</pre></details>`;
 
                     resultDiv.innerHTML = html;
                 } else {
@@ -122,6 +153,141 @@
                 }
             } catch (error) {
                 resultDiv.innerHTML = `<p style="color: red;">❌ Ошибка: ${error}</p>`;
+            }
+        });
+
+        // ========================
+        // 📦 АВТОДОПОЛНЕНИЕ ДЛЯ ПОЛЕЙ ПОСТАВЩИКОВ
+        // ========================
+
+        // Загрузка всех вариантов при загрузке страницы
+        document.addEventListener('DOMContentLoaded', function() {
+            loadPurchaseMethods();
+            loadCategories();
+        });
+
+        // Загрузка способов закупки
+        async function loadPurchaseMethods() {
+            try {
+                const response = await fetch('/api/purchase-methods');
+                const methods = await response.json();
+
+                const datalist = document.getElementById('purchase_methods');
+                datalist.innerHTML = '';
+
+                methods.forEach(method => {
+                    const option = document.createElement('option');
+                    option.value = method;
+                    datalist.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Ошибка загрузки способов закупки:', error);
+            }
+        }
+
+        // Загрузка категорий
+        async function loadCategories() {
+            try {
+                const response = await fetch('/api/categories');
+                const categories = await response.json();
+
+                const datalist = document.getElementById('categories');
+                datalist.innerHTML = '';
+
+                categories.forEach(category => {
+                    const option = document.createElement('option');
+                    option.value = category;
+                    datalist.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Ошибка загрузки категорий:', error);
+            }
+        }
+
+        // Динамический поиск при вводе
+        document.getElementById('purchase_method').addEventListener('input', function(e) {
+            const query = e.target.value;
+            if (query.length >= 2) {
+                searchPurchaseMethods(query);
+            }
+        });
+
+        document.getElementById('category').addEventListener('input', function(e) {
+            const query = e.target.value;
+            if (query.length >= 2) {
+                searchCategories(query);
+            }
+        });
+
+        async function searchPurchaseMethods(query) {
+            try {
+                const response = await fetch(`/api/search-purchase-methods/${encodeURIComponent(query)}`);
+                const methods = await response.json();
+
+                const datalist = document.getElementById('purchase_methods');
+                datalist.innerHTML = '';
+
+                methods.forEach(method => {
+                    const option = document.createElement('option');
+                    option.value = method;
+                    datalist.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Ошибка поиска способов закупки:', error);
+            }
+        }
+
+        async function searchCategories(query) {
+            try {
+                const response = await fetch(`/api/search-categories/${encodeURIComponent(query)}`);
+                const categories = await response.json();
+
+                const datalist = document.getElementById('categories');
+                datalist.innerHTML = '';
+
+                categories.forEach(category => {
+                    const option = document.createElement('option');
+                    option.value = category;
+                    datalist.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Ошибка поиска категорий:', error);
+            }
+        }
+
+        // Поиск поставщиков
+        document.getElementById('supplierForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const method = document.getElementById('purchase_method').value;
+            const category = document.getElementById('category').value;
+
+            const resultDiv = document.getElementById('supplierResult');
+            const list = document.getElementById('supplierList');
+            list.innerHTML = '<li>Загрузка...</li>';
+            resultDiv.classList.remove('hidden');
+
+            try {
+                const response = await fetch('/suppliers', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({purchase_method: method, category: category})
+                });
+                const data = await response.json();
+                if (data.status === 'success' && data.suppliers.length > 0) {
+                    list.innerHTML = '';
+                    data.suppliers.forEach(s => {
+                        list.innerHTML += `
+                            <li>
+                                <strong>${s.name}</strong> — рейтинг ${s.rating}⭐
+                                <br>Категория: ${s.category}, способ: ${s.purchase_method}
+                                <br>Контрактов: ${s.contracts_count}, сумма: ${s.total_sum.toLocaleString()} ₸
+                            </li>`;
+                    });
+                } else {
+                    list.innerHTML = '<li>❌ Поставщики не найдены</li>';
+                }
+            } catch (err) {
+                list.innerHTML = `<li>Ошибка: ${err}</li>`;
             }
         });
     </script>
