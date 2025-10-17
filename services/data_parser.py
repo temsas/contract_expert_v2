@@ -6,6 +6,8 @@ from database.db_connection import Database
 import time
 import random
 import urllib.parse
+from typing import List, Dict
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -16,107 +18,157 @@ class GosZakupParser:
         self.base_url = "https://www.goszakup.gov.kz"
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
         })
 
-    def parse_all_suppliers(self):
-        """Парсит поставщиков для ВСЕХ комбинаций способов закупки и видов предметов"""
-        all_purchase_methods = self.get_available_purchase_methods()
-        all_subject_types = self.get_available_subject_types()
-
-        all_suppliers = []
-
-        for purchase_method in all_purchase_methods:
-            for subject_type in all_subject_types:
-                try:
-                    logger.info(f"🕸️ Парсинг для {purchase_method} / {subject_type}")
-                    suppliers = self.parse_suppliers_by_params(purchase_method, subject_type)
-                    all_suppliers.extend(suppliers)
-
-                    # Пауза между запросами чтобы не перегружать сервер
-                    time.sleep(2)
-
-                except Exception as e:
-                    logger.error(f"❌ Ошибка парсинга для {purchase_method}/{subject_type}: {e}")
-                    continue
-
-        logger.info(f"✅ Всего спаршено {len(all_suppliers)} поставщиков")
-        return all_suppliers
-
-    def parse_suppliers_by_params(self, purchase_method, subject_type):
-        """Парсит поставщиков по конкретному способу закупки и виду предмета"""
+    def parse_real_time_suppliers(self, purchase_method: str, category: str, limit: int = 20) -> List[Dict]:
+        """Парсит актуальных поставщиков в реальном времени с сайта - ОБНОВЛЕННАЯ ВЕРСИЯ"""
         try:
-            # Кодируем параметры для URL
-            encoded_method = urllib.parse.quote(purchase_method)
-            encoded_subject = urllib.parse.quote(subject_type)
+            logger.info(f"🔍 Парсим актуальных поставщиков для {purchase_method} / {category}")
 
-            # Формируем URL с параметрами
-            url = f"https://www.goszakup.gov.kz/ru/top/suppliers?purchase_method={encoded_method}&subject_type={encoded_subject}&sort=count"
+            url = self._build_url(purchase_method, category)
+
+            logger.info(f"🌐 Запрос к: {url}")
 
             response = self.session.get(url, timeout=30)
             response.raise_for_status()
 
-            soup = BeautifulSoup(response.content, 'html.parser')
-
-            # Ищем таблицу с поставщиками
-            table = soup.find('table')
-            if not table:
-                logger.warning(f"⚠️ Таблица не найдена для {purchase_method}/{subject_type}")
+            if response.status_code != 200:
+                logger.error(f"❌ Ошибка HTTP: {response.status_code}")
                 return []
 
-            suppliers = []
-            rows = table.find_all('tr')[1:]  # Пропускаем заголовок
+            soup = BeautifulSoup(response.content, 'html.parser')
 
-            for i, row in enumerate(rows):
-                cols = row.find_all('td')
-                if len(cols) >= 5:
-                    try:
-                        supplier_data = self._parse_supplier_row(cols, i)
-                        if supplier_data:
-                            # Добавляем параметры из запроса
-                            supplier_data['purchase_method'] = purchase_method
-                            supplier_data['category'] = subject_type
-                            suppliers.append(supplier_data)
-                    except Exception as e:
-                        logger.warning(f"⚠️ Ошибка парсинга строки: {e}")
-                        continue
+            with open('debug_table.html', 'w', encoding='utf-8') as f:
+                f.write(soup.prettify())
+            logger.info("💾 Сохранен отладочный HTML в debug_table.html")
 
-            logger.info(f"✅ Спаршено {len(suppliers)} поставщиков для {purchase_method} / {subject_type}")
+            suppliers_table = soup.find('table', class_='table')
+            if not suppliers_table:
+                logger.warning("⚠️ Таблица поставщиков не найдена на странице")
+                all_tables = soup.find_all('table')
+                logger.info(f"📊 Найдено таблиц на странице: {len(all_tables)}")
+                for i, table in enumerate(all_tables):
+                    logger.info(f"📋 Таблица {i}: {len(table.find_all('tr'))} строк")
+
+                if all_tables:
+                    suppliers_table = all_tables[0]
+                else:
+                    return []
+
+            rows = suppliers_table.find_all('tr')
+            logger.info(f"📊 Найдено строк в таблице: {len(rows)}")
+
+            if rows:
+                first_row = rows[0]
+                headers = first_row.find_all('th')
+                logger.info(f"📝 Заголовки таблицы: {[h.get_text(strip=True) for h in headers]}")
+
+                if len(rows) > 1:
+                    sample_row = rows[1]
+                    cells = sample_row.find_all('td')
+                    logger.info(f"🔍 Пример данных строки: {[cell.get_text(strip=True) for cell in cells]}")
+
+            suppliers = self._parse_suppliers_table(suppliers_table, purchase_method, category, limit)
+            logger.info(f"✅ Спаршено {len(suppliers)} актуальных поставщиков")
+
+            for i, supplier in enumerate(suppliers):
+                logger.info(f"🏢 Поставщик {i + 1}: {supplier['name']}")
+
             return suppliers
 
+        except requests.RequestException as e:
+            logger.error(f"❌ Ошибка сети: {e}")
+            return []
         except Exception as e:
-            logger.error(f"❌ Ошибка парсинга {purchase_method}/{subject_type}: {e}")
+            logger.error(f"❌ Неожиданная ошибка при парсинге: {e}")
             return []
 
-    def _parse_supplier_row(self, cols, position):
-        """Парсит строку с данными поставщика"""
+    def _build_url(self, purchase_method: str, category: str) -> str:
+        """Строит URL в зависимости от способа закупки и категории"""
+        base_url = "https://www.goszakup.gov.kz/ru/top/suppliers"
+
+        if purchase_method == "Из одного источника путем прямого заключения договора":
+            if category == "Товар":
+                return f"{base_url}?filter%5Bmethod%5D%5B%5D=23&filter%5Bref_subject_type%5D=1&smb="
+            elif category == "Работа":
+                return f"{base_url}?filter%5Bmethod%5D%5B%5D=23&filter%5Bref_subject_type%5D=2&smb="
+            elif category == "Услуга":
+                return f"{base_url}?filter%5Bmethod%5D%5B%5D=23&filter%5Bref_subject_type%5D=3&smb="
+
+        elif purchase_method == "Через товарные биржи":
+            if category == "Товар":
+                return f"{base_url}?filter%5Bmethod%5D%5B%5D=8&filter%5Bref_subject_type%5D=1&smb="
+            elif category == "Работа":
+                return f"{base_url}?filter%5Bmethod%5D%5B%5D=8&filter%5Bref_subject_type%5D=2&smb="
+            elif category == "Услуга":
+                return f"{base_url}?filter%5Bmethod%5D%5B%5D=8&filter%5Bref_subject_type%5D=3&smb="
+
+        elif purchase_method == "Открытый конкурс":
+            if category == "Товар":
+                return f"{base_url}?filter%5Bmethod%5D%5B%5D=2&filter%5Bref_subject_type%5D=1&smb="
+            elif category == "Работа":
+                return f"{base_url}?filter%5Bmethod%5D%5B%5D=2&filter%5Bref_subject_type%5D=2&smb="
+            elif category == "Услуга":
+                return f"{base_url}?filter%5Bmethod%5D%5B%5D=2&filter%5Bref_subject_type%5D=3&smb="
+
+        encoded_method = urllib.parse.quote(purchase_method)
+        encoded_category = urllib.parse.quote(category)
+        return f"{self.base_url}/ru/top/suppliers?purchase_method={encoded_method}&subject_type={encoded_category}&sort=count"
+
+    def _parse_suppliers_table(self, table, purchase_method: str, category: str, limit: int) -> List[Dict]:
+        """Парсит таблицу с поставщиками"""
+        suppliers = []
+        rows = table.find_all('tr')[1:]
+
+        for i, row in enumerate(rows[:limit]):
+            try:
+                cols = row.find_all('td')
+                if len(cols) >= 3:
+                    supplier_data = self._parse_supplier_row(cols, i + 1)
+                    if supplier_data:
+                        supplier_data.update({
+                            'purchase_method': purchase_method,
+                            'category': category,
+                            'is_real_time': True
+                        })
+                        suppliers.append(supplier_data)
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка парсинга строки {i}: {e}")
+                continue
+
+        return suppliers
+
+    def _parse_supplier_row(self, cols, rank: int) -> Dict:
+        """Парсит строку с данными поставщика - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         try:
-            # Место в рейтинге
-            rank = position + 1
+            if len(cols) < 3:
+                return None
 
-            # Название поставщика
-            name_elem = cols[1].find('a') or cols[1]
-            name = name_elem.get_text(strip=True)
+            name = self._extract_supplier_name_advanced(cols)
 
-            # БИН
-            bin_number = cols[2].get_text(strip=True)
+            if not name or name == '-' or len(name) < 2:
+                return None
 
-            # Количество контрактов
-            contracts_text = cols[3].get_text(strip=True).replace(' ', '')
-            contracts_count = int(contracts_text) if contracts_text else 0
+            contracts_elem = cols[3] if len(cols) > 3 else None
+            contracts_text = contracts_elem.get_text(strip=True).replace(' ', '') if contracts_elem else "0"
+            contracts_count = self._parse_number(contracts_text)
 
-            # Сумма контрактов
-            sum_text = cols[4].get_text(strip=True)
+            sum_elem = cols[2] if len(cols) > 2 else None
+            sum_text = sum_elem.get_text(strip=True) if sum_elem else "0"
             total_sum = self._parse_sum(sum_text)
 
-            if not name:
-                return None
+            rating = self._calculate_dynamic_rating(rank, contracts_count, total_sum)
 
             return {
                 'name': name,
-                'bin': bin_number,
                 'contracts_count': contracts_count,
                 'total_sum': total_sum,
+                'rating': rating,
                 'rank': rank
             }
 
@@ -124,124 +176,148 @@ class GosZakupParser:
             logger.warning(f"⚠️ Ошибка парсинга строки поставщика: {e}")
             return None
 
-    def _parse_sum(self, sum_text):
-        """Парсит сумму из текста"""
+    def _extract_supplier_name_advanced(self, cols):
+        """Расширенное извлечение названия поставщика"""
         try:
-            if not sum_text:
-                return 0
+            possible_name_columns = [0, 1]
 
-            # Удаляем пробелы и преобразуем в число
-            clean_text = sum_text.replace(' ', '').replace('₸', '').replace(',', '.').strip()
+            for col_index in possible_name_columns:
+                if col_index < len(cols):
+                    name_cell = cols[col_index]
 
-            if 'млн' in clean_text.lower():
-                number = float(clean_text.lower().replace('млн', '').strip())
-                return int(number * 1000000)
-            elif 'млрд' in clean_text.lower():
-                number = float(clean_text.lower().replace('млрд', '').strip())
-                return int(number * 1000000000)
-            else:
-                return int(float(clean_text))
+                    link = name_cell.find('a')
+                    if link and link.get_text(strip=True):
+                        name = link.get_text(strip=True)
+                        if self._is_valid_supplier_name(name):
+                            return self._clean_supplier_name(name)
+
+                    name = name_cell.get_text(strip=True)
+                    if self._is_valid_supplier_name(name):
+                        return self._clean_supplier_name(name)
+
+                    for tag in ['span', 'div', 'strong', 'b']:
+                        element = name_cell.find(tag)
+                        if element and element.get_text(strip=True):
+                            name = element.get_text(strip=True)
+                            if self._is_valid_supplier_name(name):
+                                return self._clean_supplier_name(name)
+
+            return None
 
         except Exception as e:
-            logger.warning(f"⚠️ Ошибка парсинга суммы '{sum_text}': {e}")
-            return 0
+            logger.warning(f"⚠️ Ошибка расширенного извлечения названия: {e}")
+            return None
 
-    def update_all_suppliers(self):
-        """Обновляет ВСЕХ поставщиков в базе данных"""
-        try:
-            # Парсим всех поставщиков
-            all_suppliers = self.parse_all_suppliers()
-
-            if not all_suppliers:
-                logger.error("❌ Не удалось получить данные с сайта")
-                return False
-
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-
-            # Очищаем таблицу перед добавлением новых данных
-            cursor.execute("DELETE FROM suppliers")
-
-            # Добавляем ВСЕХ поставщиков с уникальными рейтингами
-            for supplier in all_suppliers:
-                rating = self._calculate_unique_rating(
-                    supplier['rank'],
-                    supplier['contracts_count'],
-                    supplier['total_sum']
-                )
-
-                cursor.execute('''
-                    INSERT INTO suppliers 
-                    (name, category, purchase_method, rating, contracts_count, total_sum)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (
-                    supplier['name'],
-                    supplier['category'],
-                    supplier['purchase_method'],
-                    rating,
-                    supplier['contracts_count'],
-                    supplier['total_sum']
-                ))
-
-            conn.commit()
-            cursor.close()
-            conn.close()
-
-            logger.info(f"✅ База данных полностью обновлена. Добавлено {len(all_suppliers)} поставщиков")
-            return True
-
-        except Exception as e:
-            logger.error(f"❌ Ошибка обновления базы данных: {e}")
+    def _is_valid_supplier_name(self, name: str) -> bool:
+        """Проверяет, что извлеченный текст похож на название компании"""
+        if not name or len(name) < 2:
             return False
 
-    def _calculate_unique_rating(self, rank, contracts_count, total_sum):
-        """Рассчитывает УНИКАЛЬНЫЙ рейтинг"""
+        invalid_patterns = [
+            r'^\d+$',
+            r'^\d+\.\d+$',
+            r'^[\d\s,\.]+$',
+            r'рейтинг', r'rating', r'ранг',
+        ]
+
+        for pattern in invalid_patterns:
+            if re.search(pattern, name.lower()):
+                return False
+
+        return True
+
+    def _clean_supplier_name(self, name: str) -> str:
+        """Очищает название поставщика"""
+        # FOR БИН ИНН/ ЕСЛИ удалить может сломаться решение неизвестно
+        clean_name = re.sub(r'БИН:\s*\d+', '', name, flags=re.IGNORECASE)
+        clean_name = re.sub(r'ИИН:\s*\d+', '', clean_name, flags=re.IGNORECASE)
+
+
+        clean_name = re.sub(r'\s+', ' ', clean_name).strip()
+        clean_name = clean_name.strip(',-–— ')
+
+        return clean_name
+
+    def _find_contracts_count(self, cols) -> int:
+        """Находит количество контрактов в разных колонках"""
+
+        possible_columns = [2, 3, 1]
+
+        for col_index in possible_columns:
+            if col_index < len(cols):
+                text = cols[col_index].get_text(strip=True)
+                count = self._parse_number(text)
+                if count > 0:
+                    return count
+
+        return 0
+
+    def _find_total_sum(self, cols) -> float:
+        """Находит общую сумму в разных колонках"""
+        possible_columns = [3, 4, 2]
+
+        for col_index in possible_columns:
+            if col_index < len(cols):
+                text = cols[col_index].get_text(strip=True)
+                total_sum = self._parse_sum(text)
+                if total_sum > 0:
+                    return total_sum
+
+        return 0.0
+
+    def _parse_number(self, text: str) -> int:
+        """Парсит число из текста"""
         try:
-            # Базовый рейтинг от 4.0 до 5.0 в зависимости от позиции
-            position_factor = max(0, 1.0 - (rank / 100))
-            base_rating = 4.0 + (position_factor * 1.0)
+            clean_text = re.sub(r'[^\d]', '', text)
+            return int(clean_text) if clean_text else 0
+        except:
+            return 0
 
-            # Бонус за количество контрактов
-            contracts_bonus = min(contracts_count / 100000, 0.3)
+    def _parse_sum(self, text: str) -> float:
+        """Парсит денежную сумму из текста"""
+        try:
+            if not text:
+                return 0.0
 
-            # Бонус за сумму контрактов
-            sum_bonus = min(total_sum / 100000000000, 0.2)
+            clean_text = text.replace(' ', '').replace(',', '.')
 
-            # Случайная компонента для уникальности
-            random_component = (random.random() - 0.5) * 0.2
+            if 'млрд' in clean_text.lower():
+                number = float(re.sub(r'[^\d.]', '', clean_text))
+                return number * 1000000000
+            elif 'млн' in clean_text.lower():
+                number = float(re.sub(r'[^\d.]', '', clean_text))
+                return number * 1000000
+            else:
+                return float(re.sub(r'[^\d.]', '', clean_text))
+
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка парсинга суммы '{text}': {e}")
+            return 0.0
+
+    def _calculate_dynamic_rating(self, rank: int, contracts_count: int, total_sum: float) -> float:
+        """Рассчитывает динамический рейтинг"""
+        try:
+            base_rating = 5.0 - (rank * 0.1)
+            contracts_bonus = min(contracts_count / 1000, 0.5)
+            sum_bonus = min(total_sum / 1000000000, 0.3)
+            random_component = random.uniform(-0.2, 0.2)
 
             rating = base_rating + contracts_bonus + sum_bonus + random_component
-            rating = max(4.0, min(rating, 5.0))
+            rating = max(3.0, min(rating, 5.0))
 
             return round(rating, 1)
 
         except:
-            return round(4.0 + random.random() * 0.5, 1)
+            return round(4.0 + random.random(), 1)
 
-    def get_available_purchase_methods(self):
+    def get_available_purchase_methods(self) -> List[str]:
         """Возвращает доступные способы закупок"""
         return [
             "Из одного источника путем прямого заключения договора",
             "Через товарные биржи",
-            "Открытый конкурс",
-            "Запрос ценовых предложений",
-            "Из одного источника по несостоявшимся закупкам",
-            "Аукцион (до 2022)",
-            "Закупка жилища",
-            "Электронный магазин",
-            "Второй этап конкурса с использованием рамочного соглашения",
-            "Из одного источника путем прямого заключения договора по питанию обучающихся",
-            "Аукцион (с 2022)",
-            "Договор на услуги государственного образовательного заказа",
-            "Конкурс с использованием рейтингово-балльной системы",
-            "Конкурс по строительству «под ключ»",
-            "Конкурс с предварительным квалификационным отбором",
-            "Закупка по государственному социальному заказу",
-            "Конкурс с применением специального порядка",
-            "Конкурс по приобретению услуг по организации питания воспитанников и обучающихся",
-            "Конкурс по приобретению товаров, связанных с обеспечением питания воспитанников и обучающихся"
+            "Открытый конкурс"
         ]
 
-    def get_available_subject_types(self):
-        """Возвращает доступные виды предметов закупок"""
+    def get_available_categories(self) -> List[str]:
+        """Возвращает доступные категории"""
         return ["Товар", "Работа", "Услуга"]

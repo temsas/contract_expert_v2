@@ -2,7 +2,7 @@ from datetime import datetime
 
 class LawArticle:
     def __init__(self, law_type, article_number, title, content, keywords):
-        self.law_type = law_type  # '44_fz' или '223_fz'
+        self.law_type = law_type
         self.article_number = article_number
         self.title = title
         self.content = content

@@ -12,7 +12,6 @@ app.config['SECRET_KEY'] = 'your-secret-key-here'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['ALLOWED_EXTENSIONS'] = {'pdf', 'doc', 'docx'}
 
-# Инициализация анализаторов при запуске
 try:
     contract_analyzer = ContractAnalyzer()
     supplier_selector = SupplierSelector()
@@ -260,7 +259,6 @@ def get_suppliers():
     category = data.get('category', '').strip()
     limit = data.get('limit', 50)
 
-    # Если оба параметра пустые, возвращаем всех поставщиков
     if not purchase_method and not category:
         top_suppliers = supplier_selector.get_filtered_suppliers(limit=limit)
     else:

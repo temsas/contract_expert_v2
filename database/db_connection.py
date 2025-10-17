@@ -10,7 +10,7 @@ class Database:
     def get_connection(self):
 
         conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row  # Чтобы результаты были как словари
+        conn.row_factory = sqlite3.Row
         return conn
 
     def init_db(self):
@@ -19,7 +19,6 @@ class Database:
         cursor = conn.cursor()
 
         try:
-            # Таблица для статей законов
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS law_articles (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

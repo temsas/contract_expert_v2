@@ -147,7 +147,6 @@ class GigaChatService:
 
             fallback_issues = []
             if "статья" in response.lower():
-                # Пытаемся найти упоминания статей
                 article_matches = re.finditer(r'[Сс]татья\s+(\d+(?:\.\d+)*[\s\S]*?)(?=[Сс]татья|$)', response)
                 for match in article_matches:
                     fallback_issues.append({

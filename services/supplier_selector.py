@@ -1,15 +1,16 @@
 # services/supplier_selector.py
 from database.db_connection import Database
 import logging
+from services.data_parser import GosZakupParser
+from typing import List, Dict
 
 logger = logging.getLogger(__name__)
-
 
 class SupplierSelector:
     def __init__(self):
         self.db = Database()
+        self.parser = GosZakupParser()
         self._ensure_suppliers_table()
-        self._ensure_initial_data()
 
     def _ensure_suppliers_table(self):
         """Создает таблицу поставщиков если её нет"""
@@ -24,117 +25,46 @@ class SupplierSelector:
                 purchase_method TEXT NOT NULL,
                 rating REAL NOT NULL,
                 contracts_count INTEGER NOT NULL,
-                total_sum REAL NOT NULL
+                total_sum REAL NOT NULL,
+                is_real_time BOOLEAN DEFAULT 0,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
 
         cursor.close()
         conn.close()
 
-    def _ensure_initial_data(self):
-        """Проверяет, есть ли данные в базе, если нет - загружает демо"""
-        conn = self.db.get_connection()
-        cursor = conn.cursor()
+    def get_real_time_suppliers(self, purchase_method: str, category: str, limit: int = 20) -> List[Dict]:
+        """Получает актуальных поставщиков в реальном времени"""
+        try:
+            logger.info(f"🕒 Получение реальных поставщиков для {purchase_method}/{category}")
 
-        cursor.execute("SELECT COUNT(*) FROM suppliers")
-        count = cursor.fetchone()[0]
+            real_suppliers = self.parser.parse_real_time_suppliers(purchase_method, category, limit)
 
-        if count == 0:
-            logger.info("🔄 База поставщиков пуста, загружаем демо-данные...")
-            self._load_demo_suppliers()
-        else:
-            logger.info(f"✅ В базе уже есть {count} поставщиков")
+            if real_suppliers:
+                logger.info(f"✅ Получено {len(real_suppliers)} актуальных поставщиков")
+                return real_suppliers
+            else:
+                logger.warning("⚠️ Не удалось получить актуальных поставщиков, используем локальные данные")
+                return self.get_cached_suppliers(purchase_method, category, limit)
 
-        cursor.close()
-        conn.close()
+        except Exception as e:
+            logger.error(f"❌ Ошибка получения реальных поставщиков: {e}")
+            return self.get_cached_suppliers(purchase_method, category, limit)
 
-    def _load_demo_suppliers(self):
-        """Загружает демо-данные"""
-        conn = self.db.get_connection()
-        cursor = conn.cursor()
-
-        demo_suppliers = [
-            ("ТОО КазСтройПром", "Работа", "Из одного источника путем прямого заключения договора", 4.8, 122,
-             1200000000),
-            ("ТОО ЭнергоСнаб", "Товар", "Аукцион (с 2022)", 4.6, 98, 900000000),
-            ("ТОО МедСнаб", "Услуга", "Запрос ценовых предложений", 4.7, 150, 1050000000),
-            ("ТОО СофтЛайн", "Услуга", "Электронный магазин", 4.9, 75, 850000000),
-            ("ТОО ТрансЛогистик", "Услуга", "Открытый конкурс", 4.5, 110, 970000000),
-            ("ТОО КазХим", "Товар", "Конкурс с использованием рейтингово-балльной системы", 4.4, 85, 800000000),
-            ("ТОО CleanCity", "Услуга", "Запрос ценовых предложений", 4.2, 120, 450000000),
-            ("ТОО АстанаСтрой", "Работа", "Конкурс по строительству «под ключ»", 4.9, 130, 1500000000),
-            ("ТОО AgroLine", "Товар", "Через товарные биржи", 4.3, 115, 770000000),
-            ("ТОО MegaFood", "Товар", "Аукцион (с 2022)", 4.6, 160, 1300000000),
-        ]
-
-        cursor.executemany('''
-            INSERT INTO suppliers (name, category, purchase_method, rating, contracts_count, total_sum)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', demo_suppliers)
-
-        conn.commit()
-        cursor.close()
-        conn.close()
-
-        logger.info(f"✅ Загружено {len(demo_suppliers)} демо-поставщиков")
-
-    def get_top_suppliers(self, purchase_method: str, category: str, limit: int = 50):
-        """Возвращает ТОП-N поставщиков по заданным параметрам"""
-        return self.get_filtered_suppliers(purchase_method, category, limit)
-
-    def get_all_purchase_methods(self):
-        """Возвращает все уникальные способы закупок из базы"""
+    def get_cached_suppliers(self, purchase_method: str, category: str, limit: int = 20) -> List[Dict]:
+        """Получает поставщиков из локальной базы"""
         conn = self.db.get_connection()
         cursor = conn.cursor()
 
         cursor.execute('''
-            SELECT DISTINCT purchase_method 
-            FROM suppliers 
-            ORDER BY purchase_method
-        ''')
-
-        methods = [row[0] for row in cursor.fetchall()]
-        cursor.close()
-        conn.close()
-
-        # Если в базе мало методов, добавляем стандартные
-        if len(methods) < 5:
-            methods.extend([
-                "Из одного источника путем прямого заключения договора",
-                "Аукцион (с 2022)",
-                "Запрос ценовых предложений",
-                "Открытый конкурс",
-                "Электронный магазин"
-            ])
-            methods = list(set(methods))  # Убираем дубликаты
-            methods.sort()
-
-        return methods
-
-    def get_filtered_suppliers(self, purchase_method: str = None, category: str = None, limit: int = 50):
-        """Возвращает поставщиков с фильтрацией (поддерживает частичные совпадения)"""
-        conn = self.db.get_connection()
-        cursor = conn.cursor()
-
-        query = '''
             SELECT name, category, purchase_method, rating, contracts_count, total_sum
-            FROM suppliers
-            WHERE 1=1
-        '''
-        params = []
+            FROM suppliers 
+            WHERE purchase_method = ? AND category = ?
+            ORDER BY rating DESC, contracts_count DESC
+            LIMIT ?
+        ''', (purchase_method, category, limit))
 
-        if purchase_method:
-            query += ' AND purchase_method LIKE ?'
-            params.append(f'%{purchase_method}%')
-
-        if category:
-            query += ' AND category LIKE ?'
-            params.append(f'%{category}%')
-
-        query += ' ORDER BY rating DESC, contracts_count DESC, total_sum DESC LIMIT ?'
-        params.append(limit)
-
-        cursor.execute(query, params)
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
@@ -147,49 +77,83 @@ class SupplierSelector:
                 'purchase_method': row[2],
                 'rating': row[3],
                 'contracts_count': row[4],
-                'total_sum': row[5]
+                'total_sum': row[5],
+                'is_real_time': False
             })
 
-        logger.info(f"🔍 Найдено {len(suppliers)} поставщиков для {purchase_method}/{category}")
         return suppliers
 
+    def cache_suppliers(self, suppliers: List[Dict]):
+        """Сохраняет поставщиков в локальную базу"""
+        if not suppliers:
+            return
 
-
-    def get_all_categories(self):
-        """Возвращает все уникальные категории из базы"""
         conn = self.db.get_connection()
         cursor = conn.cursor()
 
-        cursor.execute('''
-            SELECT DISTINCT category 
-            FROM suppliers 
-            ORDER BY category
-        ''')
+        try:
+            for supplier in suppliers:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO suppliers 
+                    (name, category, purchase_method, rating, contracts_count, total_sum, is_real_time, last_updated)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (
+                    supplier['name'],
+                    supplier['category'],
+                    supplier['purchase_method'],
+                    supplier['rating'],
+                    supplier['contracts_count'],
+                    supplier['total_sum'],
+                    supplier.get('is_real_time', False)
+                ))
 
-        categories = [row[0] for row in cursor.fetchall()]
-        cursor.close()
-        conn.close()
+            conn.commit()
+            logger.info(f"💾 Сохранено {len(suppliers)} поставщиков в кэш")
 
-        # Если в базе мало категорий, добавляем стандартные
-        if len(categories) < 3:
-            categories.extend(["Товар", "Работа", "Услуга"])
-            categories = list(set(categories))
-            categories.sort()
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения в кэш: {e}")
+            conn.rollback()
+        finally:
+            cursor.close()
+            conn.close()
 
-        return categories
+    def get_top_suppliers(self, purchase_method: str, category: str, limit: int = 20, use_cache: bool = True) -> List[Dict]:
+        """Основной метод получения поставщиков"""
+        real_suppliers = self.get_real_time_suppliers(purchase_method, category, limit)
+
+        if real_suppliers:
+            if use_cache:
+                self.cache_suppliers(real_suppliers)
+            return real_suppliers
+        else:
+            cached_suppliers = self.get_cached_suppliers(purchase_method, category, limit)
+            if cached_suppliers:
+                logger.info("📦 Используем кэшированных поставщиков")
+                return cached_suppliers
+            else:
+                logger.warning("📭 Нет данных в кэше")
+                return []
+
+    def get_all_purchase_methods(self):
+        """Возвращает все способы закупок"""
+        return self.parser.get_available_purchase_methods()
+
+    def get_all_categories(self):
+        """Возвращает все категории"""
+        return self.parser.get_available_categories()
 
     def search_categories(self, query: str):
-        """Поиск категорий по частичному совпадению"""
+        """Поиск категорий"""
         all_categories = self.get_all_categories()
         return [cat for cat in all_categories if query.lower() in cat.lower()][:10]
 
     def search_purchase_methods(self, query: str):
-        """Поиск способов закупки по частичному совпадению"""
+        """Поиск способов закупки"""
         all_methods = self.get_all_purchase_methods()
         return [method for method in all_methods if query.lower() in method.lower()][:10]
 
     def get_suppliers_stats(self):
-        """Возвращает статистику по поставщикам"""
+        """Статистика поставщиков"""
         conn = self.db.get_connection()
         cursor = conn.cursor()
 
@@ -202,8 +166,11 @@ class SupplierSelector:
         ''')
 
         stats = dict(cursor.fetchone())
-
         cursor.close()
         conn.close()
+
+
+        stats['unique_methods'] = 3
+        stats['unique_categories'] = 3
 
         return stats

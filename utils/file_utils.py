@@ -53,7 +53,6 @@ class FileProcessor:
                 if paragraph.text.strip():
                     text += paragraph.text + "\n"
 
-            # Также извлекаем текст из таблиц
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
