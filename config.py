@@ -11,7 +11,7 @@ class Config:
 
     # GigaChat
     GIGACHAT_CREDENTIALS = os.getenv('GIGACHAT_CREDENTIALS')
-    GIGACHAT_MODEL = os.getenv('GIGACHAT_MODEL', 'GigaChat-2')
+    GIGACHAT_MODEL = os.getenv('GIGACHAT_MODEL', 'GigaChat-2-Max')
 
     # Files
     UPLOAD_FOLDER = 'uploads'

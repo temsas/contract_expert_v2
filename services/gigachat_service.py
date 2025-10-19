@@ -20,7 +20,7 @@ class GigaChatService:
             from langchain_core.output_parsers import StrOutputParser
 
             self.model = GigaChat(
-                model="GigaChat-2",
+                model="GigaChat-2-Max",
                 verify_ssl_certs=False,
                 credentials=credentials,
                 timeout=120
